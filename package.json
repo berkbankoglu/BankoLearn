@@ -1,0 +1,38 @@
+{
+  "name": "banko-learn",
+  "version": "1.0.0",
+  "description": "Banko Learn - Japanese kana, vocabulary and flash cards, synced with your BankoSpace account",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri-dev": "tauri dev",
+    "tauri-build": "tauri build",
+    "test": "node tests/run.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@tauri-apps/cli": "2.0.0-rc.18",
+    "@vitejs/plugin-react": "^5.1.0",
+    "vite": "^7.2.2"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.1",
+    "@tauri-apps/api": "2.9.0",
+    "@tauri-apps/plugin-deep-link": "^2.4.7",
+    "@tauri-apps/plugin-dialog": "^2.4.2",
+    "@tauri-apps/plugin-fs": "^2.4.4",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tauri-apps/plugin-os": "^2.3.2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-shell": "^2.3.3",
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}

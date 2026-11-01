@@ -1,0 +1,101 @@
+// Freeze/crash diagnostics — writes a timeline to a log file on disk so the
+// cause of intermittent freezes can be inspected after the fact (no need to
+// watch the DevTools console live).
+//
+// Log file: %USERPROFILE%\bankospace-diag.log  (e.g. C:\Users\brkbn\bankospace-diag.log)
+//
+// What it captures:
+//  - a heartbeat every 2s with JS heap usage (spots memory growth → OOM)
+//  - FREEZE lines whenever the heartbeat is late (UI thread was blocked) with
+//    how long it was blocked
+//  - LONGTASK entries (any main-thread task ≥200ms) via PerformanceObserver
+//  - uncaught errors and unhandled promise rejections
+//  - slow localStorage writes (reported via window.__diag from App.jsx)
+//
+// This is temporary instrumentation for debugging; safe to remove later.
+
+import { invoke } from '@tauri-apps/api/core';
+
+let queue = [];
+
+function ts() {
+  return new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+}
+
+export function diag(line, alsoConsole = false) {
+  queue.push(`[${ts()}] ${line}`);
+  if (alsoConsole) console.warn('[diag]', line);
+}
+
+async function flush() {
+  if (queue.length === 0) return;
+  const batch = queue.join('\n');
+  queue = [];
+  try { await invoke('diag_log', { line: batch }); } catch (e) { /* ignore */ }
+}
+
+let started = false;
+export function initDiag() {
+  if (started) return;
+  started = true;
+  window.__diag = diag; // let other modules (App.jsx) report without importing
+
+  const mem = () => {
+    const m = performance.memory;
+    return m ? ` heap=${Math.round(m.usedJSHeapSize / 1048576)}/${Math.round(m.jsHeapSizeLimit / 1048576)}MB` : '';
+  };
+
+  diag(`=== APP START ===${mem()} ua=${navigator.userAgent}`, true);
+
+  // Flush the buffer to disk regularly.
+  setInterval(flush, 1000);
+
+  // Uncaught errors / rejections often precede a hang or a blank screen.
+  window.addEventListener('error', (e) => {
+    diag(`ERROR: ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`, true);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const r = e.reason;
+    diag(`REJECTION: ${(r && (r.message || r.toString())) || r}`, true);
+  });
+
+  // A request the Content Security Policy blocks raises no exception - the
+  // resource just never arrives. After tightening the policy that is exactly
+  // the failure that would otherwise go unnoticed.
+  window.addEventListener('securitypolicyviolation', (e) => {
+    diag(`CSP BLOCKED ${e.violatedDirective}: ${e.blockedURI || '(inline)'}`, true);
+  });
+
+  // Any main-thread task ≥200ms blocks the UI; log it.
+  try {
+    new PerformanceObserver((list) => {
+      for (const en of list.getEntries()) {
+        if (en.duration >= 200) diag(`LONGTASK ${Math.round(en.duration)}ms`, en.duration >= 500);
+      }
+    }).observe({ entryTypes: ['longtask'] });
+  } catch (e) { /* longtask unsupported */ }
+
+  // Heartbeat: if the interval fires much later than 2s, the UI thread was
+  // blocked in between — that gap IS the freeze, and we record its length.
+  // Check for freezes every 2s (so short hangs are caught), but only write a
+  // heartbeat line every ~30s to keep the log small during normal runs.
+  let last = performance.now();
+  let tick = 0;
+  setInterval(() => {
+    // Rust-side liveness signal — independent of the diag_log batch/flush path.
+    // Lets main.rs force a native WebView2 Reload() if this ever stops landing
+    // (e.g. Chromium page-freezing suspends all JS timers in the background;
+    // an eval()'d reload would be stuck in the same queue, so recovery has to
+    // come from the native side watching this ping go stale).
+    invoke('js_ping').catch(() => {});
+    const now = performance.now();
+    const gap = now - last;
+    last = now;
+    if (gap > 120000) diag(`SUSPEND gap=${Math.round(gap / 1000)}s (uyku/arka plan — donma değil)${mem()}`);
+    else if (gap > 3500) diag(`FREEZE gap=${Math.round(gap)}ms (UI was blocked ~${Math.round(gap - 2000)}ms)${mem()}`, true);
+    else if (++tick % 15 === 0) diag(`hb${mem()}`);
+  }, 2000);
+
+  // Best-effort flush when the window is closing.
+  window.addEventListener('beforeunload', () => { diag('=== APP UNLOAD ==='); flush(); });
+}
